@@ -7,6 +7,7 @@ import (
 	"github.com/schollz/progressbar/v3"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -108,10 +109,15 @@ func (m *AudioBook) SetOutput() {
 
 func (m *AudioBook) ExtractChapters() {
 	m.SetOutput()
+	fmt.Printf("Extracting Chapters\nFrom: %s\nTo: %s\n\n", m.File, m.outLocation)
 	pb := progressbar.Default(int64(len(m.chapters.Chapters)))
 	for num, chapter := range m.chapters.Chapters {
-		pb.Describe(fmt.Sprintf("Extracting: %s", chapter.Tags.Title))
+		pb.Describe(fmt.Sprintf("Extracting: %s ", chapter.Tags.Title))
 		fileName := fmt.Sprintf("%03d_%s.m4a", num, normalizeFileName(chapter.Tags.Title))
+		if strings.Contains(fileName, "opening_credits") || strings.Contains(fileName, "end_credits") {
+			pb.Add(1)
+			continue
+		}
 		outname := filepath.Join(m.outLocation, fileName)
 		kwargs := ffmpeg.KwArgs{"ss": chapter.StartTime, "to": chapter.EndTime, "c": "copy", "vn": "", "loglevel": "quiet"}
 		err := ffmpeg.Input(m.File).Output(outname, kwargs).Run()
