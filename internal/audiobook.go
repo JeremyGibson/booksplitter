@@ -3,7 +3,8 @@ package internal
 import (
 	"encoding/json"
 	"fmt"
-	ffmpeg "github.com/u2takey/ffmpeg-go"
+	ffmpeg "github.com/JeremyGibson/ffmpeg-go"
+	"github.com/schollz/progressbar/v3"
 	"os"
 	"path/filepath"
 	"time"
@@ -107,14 +108,17 @@ func (m *AudioBook) SetOutput() {
 
 func (m *AudioBook) ExtractChapters() {
 	m.SetOutput()
+	pb := progressbar.Default(int64(len(m.chapters.Chapters)))
 	for num, chapter := range m.chapters.Chapters {
+		pb.Describe(fmt.Sprintf("Extracting: %s", chapter.Tags.Title))
 		fileName := fmt.Sprintf("%03d_%s.m4a", num, normalizeFileName(chapter.Tags.Title))
 		outname := filepath.Join(m.outLocation, fileName)
-		kwargs := ffmpeg.KwArgs{"ss": chapter.StartTime, "to": chapter.EndTime, "c": "copy", "vn": ""}
-		err := ffmpeg.Input(m.File).Output(outname, kwargs).OverWriteOutput().ErrorToStdOut().Run()
+		kwargs := ffmpeg.KwArgs{"ss": chapter.StartTime, "to": chapter.EndTime, "c": "copy", "vn": "", "loglevel": "quiet"}
+		err := ffmpeg.Input(m.File).Output(outname, kwargs).Run()
 		if err != nil {
 			fmt.Printf("%s", err)
 			panic(err)
 		}
+		pb.Add(1)
 	}
 }
