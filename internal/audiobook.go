@@ -120,7 +120,7 @@ func (m *AudioBook) ExtractChapters() {
 		}
 		outname := filepath.Join(m.outLocation, fileName)
 		kwargs := ffmpeg.KwArgs{"ss": chapter.StartTime, "to": chapter.EndTime, "c": "copy", "vn": "", "loglevel": "quiet"}
-		err := ffmpeg.Input(m.File).Output(outname, kwargs).Run()
+		err := ffmpeg.Input(m.File).Output(outname, kwargs)
 		if err != nil {
 			fmt.Printf("%s", err)
 			panic(err)
