@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/frolovo22/tag"
 	"github.com/schollz/progressbar/v3"
-	"image"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,8 +14,6 @@ import (
 
 const baseOutputPathAudio = "/data/audiofiles/extracted"
 const baseImageDir = "/data/audiofiles/images"
-
-var coverImageBuffer = new(image.YCbCr)
 
 type AudioFileMeta struct {
 	FileInfo struct {
@@ -36,11 +33,6 @@ type AudioFileMeta struct {
 	} `json:"tracks"`
 }
 
-type AudioExtractor struct {
-	AudioMeta AudioFileMeta
-	videoMeta FFMpegVideoMeta
-}
-
 func executeCmd(cmd string) {
 	command := exec.Command("bash", "-c", cmd)
 	var out bytes.Buffer
@@ -53,10 +45,10 @@ func executeCmd(cmd string) {
 	}
 
 }
-func ReadFrameAsJpeg(inFileName string, am AudioFileMeta) {
-	fmt.Printf("Extracting a cover image for: %s\n\n", inFileName)
-	tempImageFile := filepath.Join(baseImageDir, normalizeFileName(am.FileInfo.Album)+".jpg")
-	firstCmd := "ffmpeg -ss " + am.FileInfo.ImageTime + " -i " + inFileName + " -frames:v 1 -vf scale=800:-1 " + tempImageFile + " -y"
+func (a *AudioFileMeta) ReadFrameAsJpeg() {
+	fmt.Printf("Extracting a cover image for: %s\n\n", a.FileInfo.FilePath)
+	tempImageFile := filepath.Join(baseImageDir, normalizeFileName(a.FileInfo.Album)+".jpg")
+	firstCmd := "ffmpeg -ss " + a.FileInfo.ImageTime + " -i " + a.FileInfo.FilePath + " -frames:v 1 -vf scale=800:-1 " + tempImageFile + " -y"
 	executeCmd(firstCmd)
 }
 
@@ -77,9 +69,15 @@ func (a *AudioFileMeta) setTrackMetadata(trackPath string, title string, trackNu
 	tags, err := tag.ReadFile(trackPath)
 	if err != nil {
 		fmt.Println(err)
+		panic(err)
 	}
 	year, err := strconv.Atoi(a.FileInfo.Year)
+	//Don't ask me why the layout has to be this but it does
 	time, err := time.Parse("2006-01-02", a.FileInfo.Date)
+	if err != nil {
+		fmt.Printf("%s\n", err)
+		panic(err)
+	}
 	tags.SetTitle(title)
 	tags.SetTrackNumber(trackNum, len(a.Tracks))
 	tags.SetArtist(a.FileInfo.Artist)
@@ -92,18 +90,18 @@ func (a *AudioFileMeta) setTrackMetadata(trackPath string, title string, trackNu
 	tags.SaveFile(trackPath)
 }
 
-func (ae *AudioExtractor) ProcessAudioFile() {
-	ReadFrameAsJpeg(ae.AudioMeta.FileInfo.FilePath, ae.AudioMeta)
-	extractTo := ae.AudioMeta.setOutput()
-	pb := progressbar.Default(int64(len(ae.AudioMeta.Tracks)))
-	for num, track := range ae.AudioMeta.Tracks {
+func (a *AudioFileMeta) ProcessAudioFile() {
+	//TODO: Add this image automatically as the Cover
+	a.ReadFrameAsJpeg()
+	extractTo := a.setOutput()
+	pb := progressbar.Default(int64(len(a.Tracks)))
+	for num, track := range a.Tracks {
 		fileName := fmt.Sprintf("%03d_%s.flac", num+1, normalizeFileName(track.Title))
 		pb.Describe(fmt.Sprintf("Extracting: %s", fileName))
-		fmt.Printf("Extracting: %s\n", fileName)
 		outName := filepath.Join(extractTo, fileName)
-		cmd := "ffmpeg -i " + ae.AudioMeta.FileInfo.FilePath + " -ss " + track.FromSecs + " -to " + track.ToSecs + " -sample_fmt s16 -q:a 0 -map a " + outName + " -y"
+		cmd := "ffmpeg -i " + a.FileInfo.FilePath + " -ss " + track.FromSecs + " -to " + track.ToSecs + " -sample_fmt s16 -q:a 0 -map a " + outName + " -y"
 		executeCmd(cmd)
-		ae.AudioMeta.setTrackMetadata(outName, track.Title, num+1)
+		a.setTrackMetadata(outName, track.Title, num+1)
 		pb.Add(1)
 	}
 }

@@ -10,7 +10,7 @@ import (
 )
 
 func processMultipleAudioFiles(metaFilesPath string) {
-
+	//TODO: Implement this
 }
 
 func processSingleAudioFile(metaFilePath string) {
@@ -18,15 +18,15 @@ func processSingleAudioFile(metaFilePath string) {
 	byteValue, _ := io.ReadAll(jsonFile)
 	if err != nil {
 		fmt.Printf("%s", err)
+		panic(err)
 	}
 	af := internal.AudioFileMeta{}
-	ae := internal.AudioExtractor{}
 	err = json.Unmarshal(byteValue, &af)
 	if err != nil {
 		fmt.Printf("%s", err)
+		panic(err)
 	}
-	ae.AudioMeta = af
-	ae.ProcessAudioFile()
+	af.ProcessAudioFile()
 }
 
 func main() {
