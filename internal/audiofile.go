@@ -2,22 +2,18 @@ package internal
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
-	ffmpeg "github.com/JeremyGibson/ffmpeg-go"
-	"github.com/disintegration/imaging"
-	"image/jpeg"
-	"io"
+	"github.com/frolovo22/tag"
+	"image"
 	"os"
+	"os/exec"
 	"path/filepath"
-	"strconv"
-	"strings"
 )
 
-const baseOutputPathAudio = "/data/audio_processing/processed"
-const tempImageFile = "/tmp/image.jpg"
+const baseOutputPathAudio = "/data/audiofiles/extracted"
+const baseImageDir = "/data/audiofiles/images"
 
-var coverImageBuffer = new(bytes.Buffer)
+var coverImageBuffer = new(image.YCbCr)
 
 type AudioFileMeta struct {
 	FileInfo struct {
@@ -37,68 +33,27 @@ type AudioFileMeta struct {
 }
 
 type AudioExtractor struct {
-	audioMeta AudioFileMeta
+	AudioMeta AudioFileMeta
 	videoMeta FFMpegVideoMeta
 }
 
-func ReadFrameAsJpeg(inFileName string, frameNum int) io.Reader {
+func executeCmd(cmd string) {
+	command := exec.Command("bash", "-c", cmd)
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	command.Stdout = &out
+	command.Stderr = &stderr
+	err := command.Run()
+	if err != nil {
+		fmt.Println(fmt.Sprint(err) + ": " + stderr.String())
+	}
+
+}
+func ReadFrameAsJpeg(inFileName string, am AudioFileMeta) {
 	fmt.Printf("Extracting a cover image for: %s\n\n", inFileName)
-	buf := bytes.NewBuffer(nil)
-	err := ffmpeg.Input(inFileName).
-		Filter("select", ffmpeg.Args{fmt.Sprintf("gte(n,%d)", frameNum)}).
-		Output("pipe:", ffmpeg.KwArgs{"vframes": 1, "format": "image2", "vcodec": "mjpeg", "loglevel": "quiet"}).
-		WithOutput(buf, os.Stdout).
-		Run()
-	if err != nil {
-		panic(err)
-	}
-	return buf
-}
-
-func (a *AudioFileMeta) getFPS() int64 {
-	kwargs := ffmpeg.KwArgs{"v": "error", "select_streams": "v:0", "show_entries": "stream=codec_name,bit_rate,channels,sample_rate : format=duration : format_tags : stream_tags", "of": "json"}
-	meta, err := ffmpeg.Probe(a.FileInfo.FilePath, kwargs)
-	if err != nil {
-		fmt.Printf("%s", err)
-	}
-	videoMeta := FFMpegVideoMeta{}
-	err = json.Unmarshal([]byte(meta), &videoMeta)
-	if err != nil {
-		fmt.Printf("%s", err)
-	}
-	fps := strings.Split(videoMeta.Streams[0].RFrameRate, "/")[0]
-	fpsi, err := strconv.ParseInt(fps, 10, 64)
-	return fpsi
-}
-
-func (a *AudioFileMeta) getTimeInSeconds(time string) int64 {
-	// A timestamp string formatted like "00:00:00"
-	timeArray := strings.Split(time, ":")
-	hours, err := strconv.ParseInt(timeArray[0], 10, 64)
-	minutes, err := strconv.ParseInt(timeArray[1], 10, 64)
-	seconds, err := strconv.ParseInt(timeArray[2], 10, 64)
-	seconds += minutes * 60
-	seconds += (hours * 60) * 60
-	if err != nil {
-		fmt.Printf("%s", err)
-	}
-	return seconds
-}
-
-func (a *AudioFileMeta) extractImageFromSource() {
-	fps := a.getFPS()
-	timeinsecs := a.getTimeInSeconds(a.FileInfo.ImageTime)
-	frametograb := fps * timeinsecs
-	reader := ReadFrameAsJpeg(a.FileInfo.FilePath, int(frametograb))
-	img, err := imaging.Decode(reader)
-	if err != nil {
-		panic(err)
-	}
-	dstImage800 := imaging.Resize(img, 800, 0, imaging.Lanczos)
-	err = jpeg.Encode(coverImageBuffer, dstImage800, nil)
-	if err != nil {
-		return
-	}
+	tempImageFile := filepath.Join(baseImageDir, normalizeFileName(am.FileInfo.Album)+".jpg")
+	firstCmd := "ffmpeg -ss " + am.FileInfo.ImageTime + " -i " + inFileName + " -frames:v 1 -vf scale=800:-1 " + tempImageFile + " -y"
+	executeCmd(firstCmd)
 }
 
 func (a *AudioFileMeta) setOutput() string {
@@ -107,38 +62,36 @@ func (a *AudioFileMeta) setOutput() string {
 		normalizeFileName(a.FileInfo.Artist),
 		normalizeFileName(a.FileInfo.Album),
 	)
-	err := os.MkdirAll(audioFileDir, os.ModeDir)
-	if err != nil {
+	if _, err := os.Stat(audioFileDir); os.IsNotExist(err) {
+		err := os.MkdirAll(audioFileDir, os.ModePerm)
 		fmt.Printf("%s", err)
-		panic(err)
 	}
 	return audioFileDir
 }
 
-func (a *AudioFileMeta) setTrackMetadata(track string) {
-
+func (a *AudioFileMeta) setTrackMetadata(trackPath string, title string, trackNum int) {
+	tags, err := tag.ReadFile(trackPath)
+	if err != nil {
+		fmt.Println(err)
+	}
+	tags.SetTitle(title)
+	tags.SetTrackNumber(trackNum, len(a.Tracks))
+	tags.SetArtist(a.FileInfo.Artist)
+	tags.SetAlbumArtist(a.FileInfo.Artist)
+	tags.SetAlbum(a.FileInfo.Album)
+	tags.SetGenre(a.FileInfo.Genre)
+	tags.SaveFile(trackPath)
 }
 
 func (ae *AudioExtractor) ProcessAudioFile() {
-	ae.audioMeta.extractImageFromSource()
-	extractTo := ae.audioMeta.setOutput()
-	for num, track := range ae.audioMeta.Tracks {
-		makeQuiet := true
+	ReadFrameAsJpeg(ae.AudioMeta.FileInfo.FilePath, ae.AudioMeta)
+	extractTo := ae.AudioMeta.setOutput()
+	for num, track := range ae.AudioMeta.Tracks {
 		fileName := fmt.Sprintf("%03d_%s.flac", num+1, normalizeFileName(track.Title))
 		fmt.Printf("Extracting: %s\n", fileName)
 		outName := filepath.Join(extractTo, fileName)
-		ikwargs := ffmpeg.KwArgs{"ss": track.FromSecs}
-		okwargs := ffmpeg.KwArgs{"to": track.ToSecs, "sample_fmt": "s16", "vn": ""}
-		if makeQuiet == true {
-			okwargs = ffmpeg.KwArgs{"to": track.ToSecs, "vn": "", "sample_fmt": "s16", "loglevel": "quiet"}
-		}
-		err := ffmpeg.Input(a.FileInfo.FilePath, ikwargs).
-			Output(outName, okwargs).
-			OverWriteOutput().ErrorToStdOut().Run()
-		if err != nil {
-			fmt.Printf("%s", err)
-			panic(err)
-		}
+		cmd := "ffmpeg -i " + ae.AudioMeta.FileInfo.FilePath + " -ss " + track.FromSecs + " -to " + track.ToSecs + " -sample_fmt s16 -q:a 0 -map a " + outName + " -y"
+		executeCmd(cmd)
+		ae.AudioMeta.setTrackMetadata(outName, track.Title, num+1)
 	}
-
 }

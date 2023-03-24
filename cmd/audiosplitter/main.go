@@ -19,12 +19,14 @@ func processSingleAudioFile(metaFilePath string) {
 	if err != nil {
 		fmt.Printf("%s", err)
 	}
-	af := internal.AudioExtractor{}
+	af := internal.AudioFileMeta{}
+	ae := internal.AudioExtractor{}
 	err = json.Unmarshal(byteValue, &af)
 	if err != nil {
 		fmt.Printf("%s", err)
 	}
-	af.ProcessAudioFile()
+	ae.AudioMeta = af
+	ae.ProcessAudioFile()
 }
 
 func main() {
